@@ -1,9 +1,17 @@
 import discord
+import datetime
 from discord.ext import commands
 import json
+import logging
 import random
 import requests
 
+
+logger = logging.getLogger('discord')
+logger.setLevel(logging.DEBUG)
+handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
+handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
+logger.addHandler(handler)
 
 config = {}
 with open('config.json') as f:
@@ -17,6 +25,24 @@ async def on_ready():
     print(bot.user.name)
     print(bot.user.id)
     print('------')
+    if not hasattr(bot, 'uptime'):
+        bot.uptime = datetime.datetime.utcnow()
+
+def get_bot_uptime():
+    now = datetime.datetime.utcnow()
+    delta = now - bot.uptime
+    hours, remainder = divmod(int(delta.total_seconds()), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    days, hours = divmod(hours, 24)
+    if days:
+        fmt = '{d} days, {h} hours, {m} minutes, and {s} seconds'
+    else:
+        fmt = '{h} hours, {m} minutes, and {s} seconds'
+    return fmt.format(d=days, h=hours, m=minutes, s=seconds)
+
+@bot.command()
+async def uptime():
+    await bot.say('Uptime: **{}**'.format(get_bot_uptime()))
 
 @bot.command()
 async def add(left : int, right : int):
