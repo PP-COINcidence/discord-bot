@@ -97,7 +97,7 @@ async def create(ctx, channel_type, name):
         await bot.say('The channel type must be \"text\" or \"voice\".', delete_after=3)
         return
     everyone = discord.PermissionOverwrite()
-    mine = discord.PermissionOverwrite(manage_channels=True, manage_roles=True)
+    mine = discord.PermissionOverwrite(manage_channels=True, manage_roles=True, move_members=True)
     try:
         await bot.create_channel(msg.server, name, (server.default_role, everyone), (msg.author, mine), type=channel_type_map[channel_type])
         await bot.say('Okay {0}, created the {1} channel named \"{2}\".'.format(msg.author, channel_type, name))
