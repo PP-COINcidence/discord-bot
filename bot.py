@@ -1,6 +1,7 @@
 import discord
 import datetime
 from discord.ext import commands
+from enum import Enum
 import json
 import logging
 import random
@@ -19,6 +20,31 @@ with open('config.json') as f:
 description = '''A really ghetto Discord bot.'''
 bot = commands.Bot(command_prefix='.', description=description)
 
+
+class UptimeStatus(Enum):
+    Online = 1
+    Offline = 2
+
+
+class UptimeMap(object):
+    def __init__(self):
+        self.internal_map = {}
+
+    def reset_user(self, mid, time=None):
+        self.internal_map[mid] = (UptimeStatus.Online, time)
+
+    def logout_user(self, mid, time):
+        self.internal_map[mid] = (UptimeStatus.Offline, time)
+
+    def remove_user(self, mid):
+        self.internal_map.pop(mid, None)
+
+    def get_users_uptime(self, mid):
+        return self.internal_map.get(mid, (None, None))
+
+
+uptime_map = UptimeMap()
+
 @bot.event
 async def on_ready():
     print('Logged in as')
@@ -27,10 +53,43 @@ async def on_ready():
     print('------')
     if not hasattr(bot, 'uptime'):
         bot.uptime = datetime.datetime.utcnow()
+    for server in bot.servers:
+        for member in server.members:
+            if member.status != discord.Status.offline:
+                uptime_map.reset_user(member.id, None)
+
+@bot.event
+async def on_member_update(before, after):
+    if before.status == discord.Status.offline and after.status != discord.Status.offline:
+        # "Log" user in
+        uptime_map.reset_user(after.id, datetime.datetime.utcnow())
+    elif before.status != discord.Status.offline and after.status == discord.Status.offline:
+        # "Log out" the user
+        uptime_map.logout_user(after.id, datetime.datetime.utcnow())
+
+@bot.event
+async def on_member_join(member):
+    uptime_map.reset_user(member.id, None)
+
+@bot.event
+async def on_member_remove(member):
+    uptime_map.remove_user(member.id)
 
 def get_bot_uptime():
+    return get_human_readable_uptime_diff(bot.uptime)
+
+def get_human_readable_user_uptime(name, mid):
+    status, time = uptime_map.get_users_uptime(mid)
+    if not status:
+        return "I haven't seen {0} since I've been brought online.".format(name)
+    status_str = 'online' if status == UptimeStatus.Online else 'offline'
+    if not time:
+        return "{0} has been {1} for as long as I have -- I don't know the exact details.".format(name, status_str)
+    return "{0} has been {1} for {2}.".format(name, status_str, get_human_readable_uptime_diff(time))
+
+def get_human_readable_uptime_diff(start_time):
     now = datetime.datetime.utcnow()
-    delta = now - bot.uptime
+    delta = now - start_time
     hours, remainder = divmod(int(delta.total_seconds()), 3600)
     minutes, seconds = divmod(remainder, 60)
     days, hours = divmod(hours, 24)
@@ -75,13 +134,19 @@ async def choose(*choices : str):
     """Chooses between multiple choices."""
     await bot.say(random.choice(choices))
 
-@bot.command(description='Looks up an image from Emil\'s gallery and posts it.')
-async def img(name : str):
+@bot.command(pass_context=True, description='Looks up an image from Emil\'s gallery and posts it.')
+async def img(ctx, name : str):
     payload = {'q': name}
     r = requests.get(config['gallery_url'], params=payload).json()
     results = r['results']
     if results:
-        await bot.say(results[0])
+        author = ctx.message.author
+        author_avatar_url = author.avatar_url or author.default_avatar_url
+        em = discord.Embed(title=name, color=0xFFFFFF)
+        em.set_author(name=author.name, icon_url=author_avatar_url)
+        em.set_image(url=results[0])
+        await bot.say(embed=em)
+        await bot.delete_message(ctx.message)
     else:
         await bot.say('No image could be matched.', delete_after=3)
 
@@ -104,5 +169,22 @@ async def create(ctx, channel_type, name):
     except Exception as e:
         await bot.say('Couldn\'t create the channel: {0}'.format(e))
 
+@bot.command(pass_context=True, description='Tells you long a user has been offline or online.')
+async def user_uptime(ctx, name : str):
+    # convert name to mid if possible
+    if ctx.message.server:
+        # Not a PM
+        user = ctx.message.server.get_member_named(name)
+    else:
+        # person pm'd the bot, so search all our servers
+        user = None
+        for server in bot.servers:
+            user = server.get_member_named(name)
+            if user:
+                break
+    if not user:
+        await bot.say('Sorry, I couldn\'t find a user named \'{0}\'.'.format(name))
+    else:
+        await bot.say(get_human_readable_user_uptime(name, user.id))
 
 bot.run(config['token'])
